@@ -1,0 +1,24 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# PHP
+vendor/
+composer.lock
+*.phar
+
+# Node (if MCP server grows)
+node_modules/
+
+# Logs
+*.log
+
+# Temp files
+/tmp/
