@@ -1,10 +1,12 @@
 # Frogman 🐸
 
-**Frogman is an MCP server for FreePBX.** It gives any AI — Claude, OpenClaw, or any MCP-compatible client — full control of a PBX through 211 tools.
+**Headless PBX control through MCP and HTTP API.** Any AI, bot, or app connects and manages FreePBX through 211 tools. No GraphQL needed.
 
-Connect via MCP and ask "why can't extension 101 make calls?" — Frogman runs live diagnostics, searches its knowledge base, and hands the AI everything it needs to answer.
+Connect via MCP and ask "why can't extension 101 make calls?" — Frogman runs live diagnostics, searches its built-in knowledge base, and hands the AI everything it needs to answer.
 
-Also includes a web console, CLI chat, and HTTP API for humans and bots. Built entirely on FreePBX's native interfaces (BMO, AMI, fwconsole). Every action is validated, permission-gated, audit-logged, and requires confirmation before making changes.
+Connect via HTTP API with token auth and build dashboards, bots, or integrations on any platform.
+
+Also includes a web console and CLI chat for direct access. Built entirely on FreePBX's native interfaces (BMO, AMI, fwconsole). Every action is validated, permission-gated, audit-logged, and requires confirmation before making changes.
 
 ## Requirements
 
