@@ -41,16 +41,35 @@ class CreateAdmin extends AbstractTool {
 			return ['dry_run' => true, 'message' => "Would create admin user `{$username}` ({$name}). Password: {$pwDisplay}."];
 		}
 
-		// Create user via Userman
-		$uid = $this->freepbx->Userman->addUser($username, $password, 'default', [
-			'displayname' => $name,
-			'email' => $email,
-		]);
+		// Create user via Userman. Signature:
+		//   addUser($username, $password, $default='none', $description=null, $extraData=[])
+		// In FreePBX 17 the return is ['status'=>bool, 'type'=>..., 'message'=>...] —
+		// not a UID — so check the status flag explicitly.
+		$res = $this->freepbx->Userman->addUser(
+			$username,
+			$password,
+			'none',
+			null,
+			['displayname' => $name, 'email' => $email]
+		);
+		if (empty($res['status'])) {
+			$msg = is_array($res) ? ($res['message'] ?? 'unknown error') : 'unknown error';
+			throw new \Exception("Failed to create user '{$username}': {$msg}");
+		}
 
-		if (empty($uid)) throw new \Exception("Failed to create user '{$username}'");
-
-		// Set as admin in FreePBX
-		$this->freepbx->Core->addAMPUser($username, $password, 'admin,*', '*');
+		// Set as admin in FreePBX. Signature:
+		//   addAMPUser($username, $password, $extension_low, $extension_high,
+		//              $deptname, $sections, $skipSHA1=false, $email='')
+		// Admin = full extension range + 'admin,*' sections (all sections accessible).
+		$this->freepbx->Core->addAMPUser(
+			$username,
+			$password,
+			'0', '9999',
+			'',
+			['*'],
+			false,
+			$email
+		);
 
 		// Set Frogman permission to admin
 		$db = $this->freepbx->Database;
