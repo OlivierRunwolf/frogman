@@ -113,6 +113,8 @@ Reads from other modules' tables are fine. Writes to other modules go through BM
 - **Confirmation required** — all mutating operations return a dry-run preview unless `confirm: true` is passed.
 - **No user-supplied PHP, SQL, or shell** is ever executed.
 
+Contributors: see [CONTRIBUTING.md](./CONTRIBUTING.md) for the full rules, why they exist, and how to add a tool.
+
 ## Tool Catalog (219 tools)
 
 ### Extensions (7)
