@@ -12,6 +12,52 @@ class DiagnoseTrunk extends AbstractTool {
 		return true;
 	}
 
+	// Trunk diagnostics surface operational config (codecs, transport, ACLs, registration
+	// state) plus the AMI endpoint dump that — depending on outbound_auth shape — may carry
+	// SIP credentials. PERM_READ would let any read-tier caller pull trunk auth material
+	// AND have it written into the audit log. Bumped to admin per #25 / GHSA driver.
+	public function permissionLevel() { return self::PERM_ADMIN; }
+
+	/**
+	 * Asterisk's `pjsip show endpoint/registration` output is a free-text key/value dump.
+	 * Frogman's audit-log post-fix (GHSA-3p65-2prr-cfvf) only redacts known-sensitive
+	 * KEYS — values embedded in arbitrary text under generic field names aren't caught.
+	 * Here we walk each line, match the field-name (left of ':') against a list of
+	 * credential-bearing names, and replace the value (right of ':') with a marker.
+	 *
+	 * Allowlist of sensitive field names (defense in depth — Asterisk's CLI output uses
+	 * lowercase snake_case for the keys, so case is normalized before matching).
+	 */
+	private static $SENSITIVE_FIELDS = [
+		'password', 'auth_password', 'md5_cred', 'password_digest',
+		'secret', 'oauth_secret', 'refresh_token',
+		'dtls_private_key',
+	];
+	private static $SENSITIVE_PATTERNS = ['/password/i', '/secret/i', '/_cred$/i', '/_token$/i', '/private_key/i'];
+
+	private static function redactSensitiveLines($raw) {
+		if (empty($raw)) return $raw;
+		$out = [];
+		foreach (explode("\n", $raw) as $line) {
+			// Match "<padding><field name><padding>: <value>" — Asterisk's CLI format.
+			if (preg_match('/^(\s*)([A-Za-z][A-Za-z0-9_\-]*)\s*:\s*(.*)$/', $line, $m)) {
+				$field = strtolower($m[2]);
+				$isSensitive = in_array($field, self::$SENSITIVE_FIELDS, true);
+				if (!$isSensitive) {
+					foreach (self::$SENSITIVE_PATTERNS as $pat) {
+						if (preg_match($pat, $field)) { $isSensitive = true; break; }
+					}
+				}
+				if ($isSensitive) {
+					$out[] = $m[1] . $m[2] . ' : ***REDACTED***';
+					continue;
+				}
+			}
+			$out[] = $line;
+		}
+		return implode("\n", $out);
+	}
+
 	public function execute($params, $context) {
 		$trunkId = $params['id'];
 		$astman = $this->freepbx->astman;
@@ -52,13 +98,15 @@ class DiagnoseTrunk extends AbstractTool {
 
 			$result['checks']['registration'] = [
 				'state' => $regState,
-				'raw' => $regData,
+				'raw' => self::redactSensitiveLines($regData),
 			];
 
-			// Endpoint detail
+			// Endpoint detail — redacted before storage so credential lines
+			// (password, md5_cred, oauth_secret, etc.) don't reach the response
+			// payload or the audit log row.
 			$epRes = $astman->Command("pjsip show endpoint {$trunkName}");
 			$epData = trim($epRes['data'] ?? '');
-			$result['checks']['endpoint_raw'] = $epData;
+			$result['checks']['endpoint_raw'] = self::redactSensitiveLines($epData);
 
 			// Qualify
 			$qualRes = $astman->send_request('PJSIPQualify', ['Endpoint' => $trunkName]);
