@@ -137,7 +137,11 @@ abstract class AbstractTool {
 			return ['type' => 'ringgroup', 'label' => $name ? "Ring Group {$exten}: {$name}" : "Ring Group {$exten}", 'key' => "rg:{$exten}"];
 		}
 		if (strpos($context, 'ext-queues') !== false) {
-			$sth = $db->prepare("SELECT data FROM queues_config WHERE extension = ? AND keyword = 'descr' LIMIT 1");
+			// queues_config has a direct `descr` column per row (matches the pattern used
+			// by SearchPbx). Previous query used `queues_config` with a `keyword='descr'`
+			// filter — that's the schema of queues_details, not queues_config — so the
+			// filter matched nothing and every queue rendered as the unnamed "Queue N" label.
+			$sth = $db->prepare("SELECT descr FROM queues_config WHERE extension = ? LIMIT 1");
 			$sth->execute([$exten]);
 			$name = $sth->fetchColumn() ?: '';
 			return ['type' => 'queue', 'label' => $name ? "Queue {$exten}: {$name}" : "Queue {$exten}", 'key' => "q:{$exten}"];
