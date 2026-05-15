@@ -188,7 +188,7 @@ class Interpret {
         self::applyRuleGroup($work, self::phrasalVerbRules(), $confidence, $risk, $reasons);
 
         $before = $work;
-        $work = preg_replace('/^\s*(create|add|new|delete|remove|disable|drop)\s+(\d{3,6})\s*$/i', '$1 extension $2', $work);
+        $work = preg_replace('/^\s*(create|add|new|delete|remove|disable|drop)\s+(\d{3,6})(.*)$/i', '$1 extension $2$3', $work);
         if ($work !== $before) {
 	    self::markRewrite($confidence, $risk, $reasons, 0.96, self::RISK_WRITE, 'numeric extension shorthand');
         }
