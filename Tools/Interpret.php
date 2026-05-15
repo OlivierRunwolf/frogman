@@ -269,6 +269,7 @@ class Interpret {
 		return [
 			['pattern' => '/\b(please|pls|plz)\b/i', 'replacement' => '', 'confidence' => 0.80, 'reason' => 'inline politeness'],
 			['pattern' => '/\b(for\s+me|if\s+you\s+can)\b/i', 'replacement' => '', 'confidence' => 0.80, 'reason' => 'inline politeness'],
+			['pattern' => '/\b(show|list|get)\s+the\s+/i', 'replacement' => '$1 ', 'confidence' => 0.82, 'reason' => 'article stripping'],
 		];
 	}
 
