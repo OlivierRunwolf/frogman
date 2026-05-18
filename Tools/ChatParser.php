@@ -1,6 +1,10 @@
 <?php
 namespace FreePBX\modules\Frogman;
 
+if (!class_exists(__NAMESPACE__ . '\\Interpret', false)) {
+	require_once realpath(__DIR__ . '/Interpret.php');
+}
+
 class ChatParser {
 
 	private static $db = null;
@@ -169,7 +173,7 @@ class ChatParser {
 
 		// Apply user input to current step (if any)
 		if ($userInput !== null) {
-			if (preg_match('/^(cancel|abort|stop)$/i', $userInput)) {
+			if (preg_match('/^(cancel|abort|stop)$/i', $userInput) || Interpret::isCorrectionCancel($userInput)) {
 				self::clearPending($sessionId);
 				return ['response' => 'Cancelled.'];
 			}
@@ -389,11 +393,17 @@ class ChatParser {
 		$inputPending = self::getInputPending($sessionId);
 		if ($inputPending) {
 			$isSkip = (bool)preg_match('/^(no|cancel|skip|nevermind|nope|abort)$/i', $msg);
+			$isCorrectionCancel = Interpret::isCorrectionCancel($msg);
 			$isWizard = ($inputPending['type'] ?? 'input') === 'wizard';
 			$isMacro = ($inputPending['type'] ?? 'input') === 'macro';
 
 			if ($isMacro) {
 				return self::advanceMacro($sessionId, $msg);
+			}
+
+			if ($isCorrectionCancel) {
+				self::clearPending($sessionId);
+				return ['response' => 'OK, cancelled. Try again with the command you want.'];
 			}
 
 			if ($isWizard) {
@@ -457,7 +467,7 @@ class ChatParser {
 			$pending['params']['confirm'] = true;
 			return ['tool' => $pending['tool'], 'params' => $pending['params']];
 		}
-		if ($pending && preg_match('/^(no|n|cancel|nevermind|nope|nah|abort)$/i', $msg)) {
+		if ($pending && (preg_match('/^(no|n|cancel|nevermind|nope|nah|abort)$/i', $msg) || Interpret::isCorrectionCancel($msg))) {
 			self::clearPending($sessionId);
 			$isFollowUp = !empty($pending['type']) && $pending['type'] === 'followup';
 			return ['response' => $isFollowUp ? 'OK, no problem.' : 'Cancelled.'];
@@ -1657,6 +1667,28 @@ class ChatParser {
 		// ── Shorthand: just a number = get extension ──
 		if (preg_match('/^(\d{3,6})$/', $msg, $m)) {
 			return ['tool' => 'fm_get_extension', 'params' => ['ext' => $m[1]]];
+		}
+		
+		// ── Interpretation Layer ──
+		// Strip filler, normalise phrasing. If it changes the input,
+		// re-parse the normalised form. Off-switchable via kvstore key
+		// 'frogman_interpret_mode'.
+		if (!$skipFuzzy) {
+			$interpreted = Interpret::interpret($msg);
+			if (is_array($interpreted) && !empty($interpreted['text']) && $interpreted['text'] !== $msg) {
+				$expanded = $interpreted['text'];
+				if (!Interpret::shouldRun($interpreted)) {
+					return ['response' => Interpret::rephrasePrompt($msg, $expanded)];
+				}
+				$result = self::parse($expanded, $sessionId, true);
+				if (is_array($result) && isset($result['tool']) && !isset($result['interpreted_as'])) {
+					$result['interpreted_as'] = $expanded;
+				}
+				if (is_array($result) && isset($result['response']) && strpos($result['response'], "don't understand") !== false) {
+					return ['response' => Interpret::rephrasePrompt($msg, $expanded)];
+				}
+				return $result;
+			}
 		}
 
 		// ── Fuzzy Intent Matching ──
