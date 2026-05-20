@@ -702,26 +702,92 @@ class Frogman extends \FreePBX_Helpers implements \BMO {
 				$lines[] = "→ Restrict with a route password or extension allowlist via Outbound Routes.";
 				return implode("\n", $lines);
 
+			case 'fm_audit_caller_id_posture':
+				if (empty($data['findings'])) {
+					return "✅ **Caller ID Posture Audit** — No issues across trunks, routes, or extensions.";
+				}
+				$lines = ["**Caller ID Posture Audit** — {$data['summary']}", ''];
+				foreach ($data['findings'] as $f) {
+					$icon = $this->severityIcon($f['severity']);
+					$refTypeRaw = (string)$f['ref_type'];
+					$refIdRaw = (string)$f['ref_id'];
+					$refType = $this->sanitizeForChat($refTypeRaw);
+					$refId = $this->sanitizeForChat($refIdRaw);
+					$refName = $f['ref_name'] !== '' ? " `" . $this->sanitizeForChat($f['ref_name']) . "`" : '';
+					$cidVal = $f['cid_value'] !== '' ? "`" . $this->sanitizeForChat($f['cid_value']) . "`" : '`(empty)`';
+					$issueSan = $this->sanitizeForChat($f['issue']);
+					$recSan = $this->sanitizeForChat($f['recommendation']);
+
+					// Link to the native FreePBX edit page so the admin fixes
+					// it through the GUI (no Frogman writes). Only extension
+					// URL form is reliable across FreePBX versions; trunk and
+					// route forms vary, leave un-linked for now.
+					$editLink = '';
+					if ($refTypeRaw === 'extension' && ctype_digit($refIdRaw)) {
+						$editUrl = '/admin/config.php?display=extensions&extdisplay=' . urlencode($refIdRaw);
+						$editLink = " · [✏️ Edit in GUI]({$editUrl})";
+					}
+
+					$lines[] = "  {$icon} " . ucfirst($refType) . " `{$refId}`{$refName} — CID: {$cidVal}{$editLink}";
+					$lines[] = "      Issue: {$issueSan}";
+					$lines[] = "      → {$recSan}";
+				}
+				return implode("\n", $lines);
+
 			case 'fm_audit_posture':
-				$lines = ["**Posture Audit** — {$data['summary']}", ''];
+				$ran = count($data['audits']);
+				$withFindings = [];
+				$clean = [];
 				foreach ($data['audits'] as $a) {
-					$top = $this->topSeverity($a['severity_counts']);
-					$icon = $a['count'] > 0 && $top !== null ? $this->severityIcon($top) : '✅';
-					// tool, summary, drilldown_phrase are Frogman-controlled
-					// constants — not user input. Safe to interpolate raw.
-					$lines[] = "  {$icon} `{$a['tool']}` — {$a['summary']}";
-					if ($a['count'] > 0) {
-						$lines[] = "      Drill down: {{cmd:{$a['drilldown_phrase']}|🔍 {$a['drilldown_phrase']}}}";
+					if ((int)$a['count'] > 0) {
+						$withFindings[] = $a;
+					} else {
+						$clean[] = $a;
 					}
 				}
-				if (!empty($data['failed_audits'])) {
+				$cleanCount = count($clean);
+				$actionCount = count($withFindings);
+				$failedCount = !empty($data['failed_audits']) ? count($data['failed_audits']) : 0;
+
+				// All-clean fast path.
+				if ($actionCount === 0 && $failedCount === 0) {
+					return "✅ **Posture Audit** — All {$ran} audits clean.";
+				}
+
+				$lines = ['## Posture Audit'];
+				$lines[] = "**Score:** {$cleanCount} of {$ran} clean";
+				$lines[] = '';
+
+				if ($actionCount > 0) {
+					$lines[] = "🔴 Action needed ({$actionCount}):";
+					foreach ($withFindings as $a) {
+						$sevParts = [];
+						foreach (['critical', 'high', 'medium', 'info'] as $sev) {
+							$c = (int)($a['severity_counts'][$sev] ?? 0);
+							if ($c > 0) $sevParts[] = "{$c} {$sev}";
+						}
+						$sevText = $sevParts ? implode(', ', $sevParts) : (string)$a['count'];
+						// display_name, drilldown_phrase, severity counts are
+						// Frogman-controlled — not user input. Safe to interpolate raw.
+						$lines[] = "   • **{$a['display_name']}** — {$sevText}    {{cmd:{$a['drilldown_phrase']}|🔍 drill down}}";
+					}
+				}
+
+				if ($cleanCount > 0) {
+					$lines[] = '';
+					$lines[] = "✅ Clean ({$cleanCount}):";
+					$cleanNames = array_map(function ($a) { return $a['display_name']; }, $clean);
+					$lines[] = '   ' . implode(' · ', $cleanNames);
+				}
+
+				if ($failedCount > 0) {
 					$lines[] = '';
 					$lines[] = "**Errored audits:**";
 					foreach ($data['failed_audits'] as $err) {
 						// Exception messages can echo user-controlled context;
 						// sanitize + wrap defensively.
 						$errMsg = $this->sanitizeForChat($err['error']);
-						$lines[] = "  ⚠️ `{$err['tool']}` — `{$errMsg}`";
+						$lines[] = "   ⚠️ `{$err['tool']}` — `{$errMsg}`";
 					}
 				}
 				return implode("\n", $lines);

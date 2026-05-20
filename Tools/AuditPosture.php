@@ -6,6 +6,7 @@ require_once __DIR__ . '/AuditVoicemailPins.php';
 require_once __DIR__ . '/AuditExtensionSecrets.php';
 require_once __DIR__ . '/AuditOrphanDids.php';
 require_once __DIR__ . '/AuditOutboundInternational.php';
+require_once __DIR__ . '/AuditCallerIdPosture.php';
 
 class AuditPosture extends AbstractTool {
 
@@ -33,10 +34,11 @@ class AuditPosture extends AbstractTool {
 		// Hardcoded list — small, explicit, and obviously the set we want
 		// rolled up. When fm_audit_* grows, add the new tool here.
 		$audits = [
-			['tool' => 'fm_audit_voicemail_pins', 'class' => AuditVoicemailPins::class, 'drilldown' => 'audit voicemail pins'],
-			['tool' => 'fm_audit_extension_secrets', 'class' => AuditExtensionSecrets::class, 'drilldown' => 'audit extension secrets'],
-			['tool' => 'fm_audit_orphan_dids', 'class' => AuditOrphanDids::class, 'drilldown' => 'audit orphan dids'],
-			['tool' => 'fm_audit_outbound_international', 'class' => AuditOutboundInternational::class, 'drilldown' => 'audit international'],
+			['tool' => 'fm_audit_voicemail_pins', 'class' => AuditVoicemailPins::class, 'drilldown' => 'audit voicemail pins', 'display_name' => 'Voicemail PINs'],
+			['tool' => 'fm_audit_extension_secrets', 'class' => AuditExtensionSecrets::class, 'drilldown' => 'audit extension secrets', 'display_name' => 'Extension Secrets'],
+			['tool' => 'fm_audit_orphan_dids', 'class' => AuditOrphanDids::class, 'drilldown' => 'audit orphan dids', 'display_name' => 'Orphan DIDs'],
+			['tool' => 'fm_audit_outbound_international', 'class' => AuditOutboundInternational::class, 'drilldown' => 'audit international', 'display_name' => 'International Dialing'],
+			['tool' => 'fm_audit_caller_id_posture', 'class' => AuditCallerIdPosture::class, 'drilldown' => 'audit caller id', 'display_name' => 'Caller ID Posture'],
 		];
 
 		$results = [];
@@ -58,6 +60,7 @@ class AuditPosture extends AbstractTool {
 				$totalFindings += $count;
 				$results[] = [
 					'tool' => $audit['tool'],
+					'display_name' => $audit['display_name'],
 					'count' => $count,
 					'severity_counts' => $sevs,
 					'summary' => $out['summary'] ?? '',
