@@ -45,9 +45,40 @@ class AddInboundRoute extends AbstractTool {
 		return $dest; // unknown shape — let Core validate
 	}
 
+	// Classify an extension destination by which BMO half is present.
+	// FreePBX's Inbound Route GUI destination dropdown is built from core_destinations(),
+	// which only registers extensions that have a row in the `users` table. Device-only
+	// extensions are dialable but won't appear in the dropdown, so any route pointing at
+	// one shows red ("unknown destination") when edited in the GUI even though the
+	// destination string itself is in the canonical from-did-direct,<ext>,1 format.
+	// Surface this to the caller so they know what to expect.
+	private function classifyExtensionDestination($ext) {
+		$user = $this->freepbx->Core->getUser((string)$ext);
+		if (!empty($user)) return 'user';
+		$device = $this->freepbx->Core->getDevice((string)$ext);
+		if (!empty($device)) return 'device-only';
+		return 'none';
+	}
+
 	public function execute($params, $context) {
 		$confirm = !empty($params['confirm']) && $params['confirm'] === true;
 		$dest = $this->resolveDestination($params['destination']);
+
+		// Extension-destination existence/visibility check. Only applies when the resolved
+		// destination is the from-did-direct,<ext>,1 form — i.e. caller passed a bare
+		// extension number, not a pre-formatted string or a different destination type.
+		$advisory = '';
+		if (preg_match('/^from-did-direct,(\d+),1$/', $dest, $m)) {
+			$ext = $m[1];
+			$kind = $this->classifyExtensionDestination($ext);
+			if ($kind === 'none') {
+				return ['error' => "Extension {$ext} does not exist (no user or device record). Route not created."];
+			}
+			if ($kind === 'device-only') {
+				$advisory = " ⚠️ Extension {$ext} is device-only (no user record). The route will work, but the FreePBX GUI Inbound Routes editor will show this destination as unknown/red. To fix: create a user-mode Extension {$ext} via Applications → Extensions.";
+			}
+		}
+
 		$incoming = [
 			'extension' => $params['extension'],
 			'cidnum' => $params['cidnum'] ?? '',
@@ -60,9 +91,9 @@ class AddInboundRoute extends AbstractTool {
 		$descNote = !empty($params['description']) ? " — _{$params['description']}_" : '';
 		if (!$confirm) {
 			$cidNote = !empty($params['cidnum']) ? " (CID match: {$params['cidnum']})" : '';
-			return ['dry_run' => true, 'message' => "Would add inbound route: DID `{$params['extension']}`{$cidNote} → `{$dest}`{$descNote}. Reply yes to confirm.", 'route' => $incoming];
+			return ['dry_run' => true, 'message' => "Would add inbound route: DID `{$params['extension']}`{$cidNote} → `{$dest}`{$descNote}.{$advisory} Reply yes to confirm.", 'route' => $incoming];
 		}
 		\FreePBX::Core()->addDID($incoming);
-		return ['dry_run' => false, 'message' => "Inbound route added: DID `{$params['extension']}` → `{$dest}`{$descNote}", 'needs_reload' => true];
+		return ['dry_run' => false, 'message' => "✅ Inbound route added: DID `{$params['extension']}` → `{$dest}`{$descNote}.{$advisory}", 'needs_reload' => true];
 	}
 }

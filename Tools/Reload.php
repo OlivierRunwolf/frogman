@@ -32,6 +32,14 @@ class Reload extends AbstractTool {
 		}
 		$res = do_reload();
 		// fwconsole reload (called by do_reload) clears need_reload itself on success — no manual UPDATE needed.
-		return ['dry_run' => false, 'message' => 'Configuration reload completed.', 'active_calls_at_reload' => $activeCalls, 'result' => $res];
+		$lines = [
+			'🐸 Hopped to it — new configuration is live.',
+			'✅ Reloaded. Asterisk has the new config; calls flowing on the new rules.',
+			'✅ Configuration applied. We\'re live.',
+			'🐸 Tango handled the reload — new rules are live.',
+			'✅ Reloaded — the PBX is running the new config now.',
+		];
+		$msg = $lines[array_rand($lines)];
+		return ['dry_run' => false, 'message' => $msg, 'active_calls_at_reload' => $activeCalls, 'result' => $res];
 	}
 }

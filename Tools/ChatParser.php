@@ -1479,6 +1479,11 @@ class ChatParser {
 			self::setPending($sessionId, 'fm_originate_call', $params);
 			return ['tool' => 'fm_originate_call', 'params' => $params];
 		}
+		if (preg_match('/^call\s+(\+?[0-9*#]{2,18})\s+from\s+(?:ext(?:ension)?\s+)?(\d+)\s*$/i', $msg, $m)) {
+			$params = ['ext' => $m[2], 'dest' => $m[1]];
+			self::setPending($sessionId, 'fm_originate_call', $params);
+			return ['tool' => 'fm_originate_call', 'params' => $params];
+		}
 		if (preg_match('/^hangup\s+(\S+)$/i', $msg, $m)) {
 			$params = ['channel' => $m[1]];
 			self::setPending($sessionId, 'fm_hangup_call', $params);
@@ -2108,6 +2113,7 @@ class ChatParser {
 
 **Live Call Control:**
   `call <ext> to <number>` — click-to-call
+  `call <number> from <ext>` — same, opposite phrasing
   `hangup <channel>` — hang up a channel
   `transfer <channel> to <ext>`
   `park <channel>`
