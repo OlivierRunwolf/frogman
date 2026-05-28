@@ -14,6 +14,14 @@
 #   - File GHSAs
 #   - Update memory
 #
+# Required repo secrets (Settings -> Secrets and variables -> Actions):
+#   GPG_PRIVATE_KEY  Armored private key with publisher trust signature from
+#                    FreePBX Module Signing v2 master (1588A7366BD35B34).
+#                    Generated via: gpg --export-secret-keys --armor <KEYID>
+#   GPG_PASSPHRASE   Passphrase that unlocks GPG_PRIVATE_KEY. Used to import
+#                    the key + preset its passphrase in the gpg-agent so
+#                    sign.php's clearsign call runs unattended.
+#
 # To ship a release: bump module.xml, commit, then:
 #   git tag -a v1.6.4 -m "$(cat <<EOF
 #   v1.6.4 — bug-fix sweep
@@ -76,24 +84,69 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tarball=/tmp/frogman-${VERSION}.tgz" >> "$GITHUB_OUTPUT"
 
-      - name: Build tarball from git archive
+      - name: Extract tracked files
         run: |
           set -euo pipefail
-          # Same shape as the local manual build:
-          #   git archive --format=tar HEAD --prefix=frogman/ | tar -xf -
-          #   tar -czf frogman-X.X.X.tgz frogman/
-          # Only tracked files end up in the tarball — orphans / .gitignore'd
-          # files can't sneak in.
+          # Only tracked files end up here — orphans / .gitignore'd files can't
+          # sneak in. The signing step (next) writes module.sig into this dir,
+          # then the tarball step packs it up.
           mkdir -p /tmp/release
           git archive --format=tar HEAD --prefix=frogman/ | tar -xf - -C /tmp/release
+
+      - name: Set up GPG signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          # Import the signing private key + preset passphrase in the agent so
+          # sign.php's `gpg --clearsign` call (which has no flag to pass a
+          # passphrase) finds it cached. Mirrors the dev-box flow used 2026-05-28.
+          mkdir -p ~/.gnupg
+          chmod 700 ~/.gnupg
+          {
+            echo "allow-preset-passphrase"
+            echo "default-cache-ttl 7200"
+            echo "max-cache-ttl 7200"
+          } > ~/.gnupg/gpg-agent.conf
+          gpgconf --kill gpg-agent
+
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --pinentry-mode loopback \
+            --passphrase "$GPG_PASSPHRASE" --import
+
+          KEYGRIP=$(gpg --with-keygrip --list-secret-keys \
+            | awk '/Keygrip/ {print $3; exit}')
+          # gpg-preset-passphrase isn't on $PATH (sits under /usr/lib/gnupg{,2}).
+          PRESET=$(find /usr/lib /usr/libexec -name gpg-preset-passphrase 2>/dev/null \
+            | head -1)
+          test -x "$PRESET" || { echo "gpg-preset-passphrase not found"; exit 1; }
+          "$PRESET" --preset "$KEYGRIP" <<< "$GPG_PASSPHRASE"
+
+      - name: Sign module
+        run: |
+          set -euo pipefail
+          # Use Sangoma's canonical signing script (FreePBX/devtools/sign.php).
+          # Passing the keyid as an explicit arg bypasses validateKey()'s lookup
+          # for a Mirror Servers sig — our key carries the v2 master tsign
+          # instead, which sign.php's auto-detect doesn't recognize.
+          git clone --depth 1 https://github.com/FreePBX/devtools.git /tmp/devtools
+          KEYID='021979A8A1002442'
+          php /tmp/devtools/sign.php /tmp/release/frogman "$KEYID"
+          test -f /tmp/release/frogman/module.sig
+          head -1 /tmp/release/frogman/module.sig \
+            | grep -q 'BEGIN PGP SIGNED MESSAGE'
+
+      - name: Build tarball
+        run: |
+          set -euo pipefail
           tar -czf '${{ steps.version.outputs.tarball }}' -C /tmp/release frogman/
           ls -lh '${{ steps.version.outputs.tarball }}'
 
       - name: Verify tarball contents
         run: |
           set -euo pipefail
-          # Sanity check: tarball must contain Frogman.class.php and module.xml,
-          # and the module.xml version must match the tag version.
+          # Sanity check: tarball must contain Frogman.class.php, module.xml,
+          # and module.sig; module.xml version must match the tag version.
           #
           # `grep -q` exits on first match; combined with `set -o pipefail` this
           # makes `tar | grep -q` fail when grep closes the pipe early (tar gets
@@ -104,6 +157,7 @@ jobs:
           VER='${{ steps.version.outputs.version }}'
           tar -tzf "$TAR" | grep '^frogman/Frogman\.class\.php$' > /dev/null
           tar -tzf "$TAR" | grep '^frogman/module\.xml$' > /dev/null
+          tar -tzf "$TAR" | grep '^frogman/module\.sig$' > /dev/null
           tar -xzOf "$TAR" frogman/module.xml \
             | grep "<version>${VER}</version>" > /dev/null \
             || { echo "module.xml version does not match tag ${VER}"; exit 1; }
