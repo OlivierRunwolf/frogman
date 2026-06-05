@@ -59,8 +59,10 @@ Use `installlocal` (not `install`) — `install` hits online repos and fails bec
 
 ```bash
 fwconsole ma list | grep frogman
-# | frogman | x.x.x | Enabled | AGPLv3+ | Unsigned |
+# | frogman | x.x.x | Enabled | AGPLv3+ | Unknown |
 ```
+
+`Unknown` in the Signature column is expected — it means the module is signed, just not with one of Sangoma's two hardcoded keys. It is not a verification failure.
 
 ### Post-Install (Optional)
 
