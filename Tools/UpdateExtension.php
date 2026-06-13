@@ -10,7 +10,7 @@ class UpdateExtension extends AbstractTool {
 	}
 
 	public function description() {
-		return 'Update an existing extension in place. Params: ext (required), plus any fields to change: name, secret, outboundcid. Voicemail, follow-me, Userman, and every other extension setting are preserved. Requires confirm:true to execute.';
+		return 'Update an existing extension in place. Params: ext (required), plus any fields to change: name, secret, outboundcid. A NAME change is propagated EVERYWHERE the name is shown — the FreePBX display name, the User Manager display name, the device description, and the physical phone(s): their provisioning config is rebuilt from the new name and pushed to the handset (resync) so the new name appears on screen. Voicemail, follow-me, Userman links, and every other extension setting are preserved. Requires confirm:true to execute.';
 	}
 
 	public function validate($params) {
@@ -62,10 +62,24 @@ class UpdateExtension extends AbstractTool {
 			];
 		}
 
+		// A name change ripples out to the phones; look them up so the preview can
+		// warn the admin that the handset(s) will resync.
+		$nameChanged = isset($userChanges['name']);
+		$phones = $nameChanged ? $this->getEpmPhones($ext) : [];
+
 		if (!$confirm) {
+			$extra = '';
+			if ($nameChanged) {
+				$extra = ' The new name will also be applied to the User Manager display name and the device description.';
+				if (!empty($phones)) {
+					$labels = array_map([$this, 'phoneLabel'], $phones);
+					$extra .= ' ' . count($phones) . ' phone(s) will be reprovisioned and will briefly resync: '
+						. implode(', ', $labels) . '.';
+				}
+			}
 			return [
 				'dry_run' => true,
-				'message' => "Would update extension {$ext}. Pass confirm:true to execute.",
+				'message' => "Would update extension {$ext}. Pass confirm:true to execute." . $extra,
 				'changes' => $allChanges,
 				'preserved' => 'Voicemail, follow-me, Userman, recording prefs, and every unchanged setting will be preserved.',
 			];
@@ -106,11 +120,99 @@ class UpdateExtension extends AbstractTool {
 			$this->freepbx->Core->addDevice($ext, $device['tech'], $deviceVars, true);
 		}
 
-		return [
+		$result = [
 			'dry_run' => false,
 			'message' => "Extension {$ext} updated successfully",
 			'changes' => $allChanges,
 			'needs_reload' => true,
 		];
+
+		// A name change must show up EVERYWHERE the old name lived, not just in
+		// users.name (which Core->addUser above handles). The PJSIP connected-line
+		// caller-ID name is regenerated from users.name on reload, but these are
+		// NOT: the User Manager display name (UCP), the device description (GUI),
+		// and — most visibly to the user — the screen of the physical phone(s),
+		// whose label only changes when the EPM provisioning file is rebuilt from
+		// the new name and pushed to the handset (endpoint update = resync).
+		if ($nameChanged) {
+			$newName = $params['name'];
+			$propagated = ['users.name'];
+
+			try {
+				$db = $this->freepbx->Database();
+				$sth = $db->prepare("UPDATE devices SET description = ? WHERE id = ?");
+				$sth->execute([$newName, $ext]);
+				$propagated[] = 'devices.description';
+			} catch (\Throwable $e) {
+				$result['device_description_error'] = $e->getMessage();
+			}
+
+			try {
+				$db = $this->freepbx->Database();
+				$sth = $db->prepare("UPDATE userman_users SET displayname = ? WHERE default_extension = ?");
+				$sth->execute([$newName, $ext]);
+				if ($sth->rowCount() > 0) {
+					$propagated[] = 'userman.displayname';
+				}
+			} catch (\Throwable $e) {
+				$result['userman_error'] = $e->getMessage();
+			}
+
+			// Reprovision the physical phone(s): rebuild the config from the new
+			// name, then push it so the handset re-pulls and shows the new label.
+			$reprovisioned = [];
+			foreach ($phones as $p) {
+				$epmExt = $p['ext'];
+				$rebuild = $this->runFwconsole('endpoint rebuild ' . $epmExt);
+				$update  = $this->runFwconsole('endpoint update ' . $epmExt);
+				$reprovisioned[] = [
+					'phone' => $epmExt,
+					'mac' => $p['mac'] ?? '',
+					'model' => $this->phoneModel($p),
+					'ok' => ($rebuild['exit_code'] === 0 && $update['exit_code'] === 0),
+				];
+			}
+			if (!empty($reprovisioned)) {
+				$result['reprovisioned'] = $reprovisioned;
+				$okCount = count(array_filter($reprovisioned, function ($r) { return $r['ok']; }));
+				$propagated[] = "{$okCount}/" . count($reprovisioned) . ' phone(s) reprovisioned';
+			}
+
+			$result['propagated'] = $propagated;
+			$result['message'] = "Extension {$ext} renamed to \"{$newName}\" everywhere"
+				. (!empty($reprovisioned)
+					? ' (display name, User Manager, device, and ' . count($reprovisioned) . ' phone(s))'
+					: ' (display name, User Manager, device)')
+				. '. Reload to finish applying.';
+		}
+
+		return $result;
+	}
+
+	/**
+	 * EPM phones provisioned for this extension. endpoint_extensions maps each
+	 * handset to "<ext>-<n>" (e.g. 24-1, 24-2). Returns [] when EPM isn't
+	 * installed or the extension has no provisioned phones (softphone only) — in
+	 * either case the table query fails or returns nothing and we skip silently.
+	 */
+	private function getEpmPhones($ext) {
+		try {
+			$db = $this->freepbx->Database();
+			$sth = $db->prepare("SELECT ext, mac, brand, model FROM endpoint_extensions WHERE ext LIKE ?");
+			$sth->execute([$ext . '-%']);
+			$rows = $sth->fetchAll(\PDO::FETCH_ASSOC);
+			return is_array($rows) ? $rows : [];
+		} catch (\Throwable $e) {
+			return [];
+		}
+	}
+
+	private function phoneModel($p) {
+		return trim(($p['brand'] ?? '') . ' ' . ($p['model'] ?? ''));
+	}
+
+	private function phoneLabel($p) {
+		$model = $this->phoneModel($p);
+		return $p['ext'] . ($model !== '' ? " ({$model})" : '');
 	}
 }
