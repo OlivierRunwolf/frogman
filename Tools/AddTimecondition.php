@@ -23,8 +23,12 @@ class AddTimecondition extends AbstractTool {
 			'displayname' => $name,
 			'time' => $params['timegroup'] ?? 0,
 			'timezone' => $params['timezone'] ?? '',
-			'goto0' => 'goto', 'goto0goto' => $params['truegoto'],
-			'goto1' => 'goto', 'goto1goto' => $params['falsegoto'],
+			// addTimeCondition reads the matched dest from $post[$post['goto0'].'0'] and the
+			// unmatched dest from $post[$post['goto1'].'1'] (FreePBX destination-widget convention).
+			// Using goto0='goto'/goto0goto stored the literal string "goto" as the destination —
+			// the condition routed nowhere. Set goto0='dest'/dest0 so the real target is read.
+			'goto0' => 'dest', 'dest0' => $params['truegoto'],
+			'goto1' => 'dest', 'dest1' => $params['falsegoto'],
 			'invert_hint' => '0',
 			'fcc_password' => '',
 			'deptname' => '',
